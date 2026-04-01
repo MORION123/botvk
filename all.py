@@ -138,7 +138,13 @@ class BotDatabase:
 
 # ==================== КОНСТАНТЫ И УТИЛИТЫ ====================
 
-n1, n2, n3, n4 = 2000000003, 2000000005, 2000000006, 2000000008
+# ПРАВИЛЬНЫЕ peer_id для чатов
+# n1 - лайки 10|10 (не используется в вашем чате)
+# n2 - подписки 5|5 (ВАША БЕСЕДА)
+# n3 - комментарии 3|3 (не используется)
+# n4 - лайки 20|20 (не используется)
+n1, n2, n3, n4 = 2000000003, 2000000204, 2000000006, 2000000008
+
 admins = [794312655, 838744775, 814161744, 147438490]
 lim = {n1: 11, n2: 6, n3: 4, n4: 21}
 
@@ -331,7 +337,6 @@ class BaseBot:
 class like(BaseBot):
     def __init__(self):
         super().__init__()
-        # Своя БД для лайков 10|10
         self.db = BotDatabase('likes10.db', 'links')
         self.mess1 = 'пожалуйста, ЛАЙК на обязательные ссылки 𝓑𝓤𝞟:'
         self.mess2 = 'мы проставляем лайки по 10 последним ссылкам чата'
@@ -339,7 +344,6 @@ class like(BaseBot):
         self.path = 'vipsforlikes.txt'
         self.path3 = 'Ludil.txt'
         
-        # Создание клавиатуры
         self.keyboard = VkKeyboard(one_time=False)
         self.keyboard.add_button("❤️ПРАВИЛА ЧАТА❤️", VkKeyboardColor.PRIMARY)
         self.keyboard.add_line()
@@ -353,7 +357,6 @@ class like(BaseBot):
         self.keyboard.add_button("🚀ТУРБО-VIP🚀", VkKeyboardColor.POSITIVE)
     
     def is_liked(self, link: str, user_id: int) -> bool:
-        """Проверка лайка на пост"""
         try:
             post_id = int(re.findall(r'\d+', link[link.find('wall'):])[1])
             owner_id = int(link[link.index('wall')+4:].split('_')[0])
@@ -369,7 +372,6 @@ class like(BaseBot):
             return True
     
     def check(self, link: str) -> bool:
-        """Проверка существования поста"""
         try:
             owner_id = int(link[link.index('wall')+4:link.find('_', link.index('wall')+4)])
             post_id = int(re.findall(r'\d+', link[link.find('wall'):])[1])
@@ -384,7 +386,6 @@ class like(BaseBot):
             return False
     
     def handle_link_automata(self, user: User, message: str, y: int, namesurname: str, peer_id: int) -> Optional[str]:
-        """Обработка ссылки через конечный автомат"""
         user_id = user.user_id
         
         if not self.is_user_allowed(user_id, peer_id):
@@ -397,7 +398,6 @@ class like(BaseBot):
             self.delete_message(n1, y)
             return f'⚠ {namesurname}{message_text} Дождитесь.'
 
-        # Чтение VIP ссылок
         vip_data = {}
         try:
             if os.path.exists(self.path):
@@ -407,7 +407,6 @@ class like(BaseBot):
         except Exception as e:
             logger.error(f"Error reading VIP data: {e}")
 
-        # Обработка VIP ссылок
         vip_links = self.sort1(vip_data, y, user_id, namesurname)
         if vip_links:
             return None
@@ -424,7 +423,6 @@ class like(BaseBot):
                 self.limit[user_id] = lim.get(peer_id, 10)
                 self.update_limits()
                 
-                # Добавляем ссылку в свою БД
                 if self.db.add_link(message):
                     logger.info(f"Link added to likes10 by {namesurname}: {message}")
                 else:
@@ -434,8 +432,6 @@ class like(BaseBot):
         return None
 
     def cond(self, x: str, y: int, q: int, namesurname: str):
-        """Основной метод обработки сообщений"""
-        # Обработка команд
         if 'УСЛУГА VIP' in x:
             self.delete_message(n1, y)
             self.send_message(n1, 
@@ -465,7 +461,6 @@ class like(BaseBot):
 
         self.cleanup_expired_states()
 
-        # Обработка ссылок через автомат
         if self.cond2(x):
             user = self.user_states.get(q, User(q))
             response = self.handle_link_automata(user, x, y, namesurname, n1)
@@ -473,7 +468,6 @@ class like(BaseBot):
                 self.send_message(n1, response)
             return
 
-        # Обработка VIP команд
         if len(x.split()) == 2 and x.split()[0].lower() == 'з' and self.cond2(x.split()[1]) and filer(str(q), self.path3):
             self.delete_message(n1, y)
             if q in admins or q not in self.viptime or time.time() - self.viptime.get(q, 0) > 7200:
@@ -550,7 +544,6 @@ class like(BaseBot):
                 self.send_message(n1, '⚠ ' + namesurname + ', разрешается публиковать только ссылку на пост.')
 
     def sorting(self, items: List[str], mes: str, y: int, namesurname: str):
-        """Отправка списка постов для обработки"""
         if items:
             self.delete_message(n1, y)
             items_text = ''.join(f'{i}. {post}\n' for i, post in enumerate(items, 1))
@@ -565,7 +558,6 @@ class like(BaseBot):
             self.send_message(n1, f'{namesurname}, вы прошли все ссылки. Размещайте свою ссылку повторно.')
 
     def sort1(self, vip_data: Dict[str, Any], y: int, q: int, namesurname: str) -> List[str]:
-        """Обработка VIP ссылок"""
         string = list(vip_data.values())
         self.vipslovar[q] = [
             i for i in string 
@@ -575,16 +567,14 @@ class like(BaseBot):
         return self.vipslovar[q]
 
     def sort2(self, y: int, q: int, namesurname: str) -> List[str]:
-        """Получение обычных ссылок из БД"""
         try:
-            results = self.db.get_recent_links(20)  # Берем больше, чтобы отфильтровать
-            # Фильтруем в коде Python
+            results = self.db.get_recent_links(20)
             self.Ax[q] = []
             for row in results:
                 link = row[0]
                 if not self.is_liked(link, q) and self.check(link):
                     self.Ax[q].append(link)
-                    if len(self.Ax[q]) >= 10:  # Ограничиваем 10 ссылками
+                    if len(self.Ax[q]) >= 10:
                         break
         except Exception as e:
             logger.error(f"Error in sort2: {e}")
@@ -595,7 +585,6 @@ class like(BaseBot):
         return self.Ax[q]
 
     def sort3(self, string: List[str], y: int, q: int, namesurname: str) -> List[str]:
-        """Проверка оставшихся постов"""
         self.posts[q] = [
             i for i in string 
             if not self.is_liked(i, q)
@@ -604,7 +593,6 @@ class like(BaseBot):
         return self.posts[q]
 
     def cond2(self, x: str) -> bool:
-        """Проверка валидности URL для лайков"""
         return validators.url(x) and ('vk.com' in x  or 'vk.ru' in x) and 'wall' in x
 
 # ==================== КЛАСС FOL (ПОДПИСКИ) ====================
@@ -612,7 +600,6 @@ class like(BaseBot):
 class fol(BaseBot):
     def __init__(self):
         super().__init__()
-        # Своя БД для подписок
         self.db = BotDatabase('followers.db', 'groups')
         self.path = 'vipsforpodpiska.txt'
         self.mess1 = 'пожалуйста, подписка на ссылки 𝓑𝓤𝞟'
@@ -630,7 +617,6 @@ class fol(BaseBot):
         self.keyboard.add_button("✨УСЛУГА VIP✨", VkKeyboardColor.NEGATIVE)
     
     def is_followed(self, link: str, user_id: int) -> bool:
-        """Проверка подписки на группу"""
         try:
             if '@club' in link:
                 group_id = link[link.find('@club')+5:]
@@ -642,7 +628,6 @@ class fol(BaseBot):
             return True
 
     def check(self, link: str) -> bool:
-        """Проверка валидности группы"""
         try:
             group_id = link[link.find('vk.com/')+7:]
             session.groups.getMembers(group_id=group_id)
@@ -652,7 +637,6 @@ class fol(BaseBot):
             return False
 
     def handle_link_automata(self, user: User, message: str, y: int, namesurname: str, peer_id: int) -> Optional[str]:
-        """Обработка ссылки на группу"""
         user_id = user.user_id
         
         if user_id in self.limit:
@@ -663,7 +647,6 @@ class fol(BaseBot):
             self.delete_message(n2, y)
             return f'⚠ {namesurname}, запрещено публиковать ссылку на приватную группу!'
 
-        # Чтение VIP ссылок
         vip_links = []
         try:
             if os.path.exists(self.path):
@@ -673,20 +656,18 @@ class fol(BaseBot):
         except Exception as e:
             logger.error(f"Error reading VIP groups: {e}")
 
-        # Обработка VIP ссылок
         vip_result = self.sort1(vip_links, y, user_id, namesurname)
         if vip_result:
             return None
 
-        # Обработка обычных ссылок через БД
         try:
-            results = self.db.get_recent_links(10)  # Берем больше для фильтрации
+            results = self.db.get_recent_links(10)
             A = []
             for row in results:
                 link = row[0]
                 if not self.is_followed(link, user_id) and self.check(link):
                     A.append(link)
-                    if len(A) >= 5:  # Ограничиваем 5 группами
+                    if len(A) >= 5:
                         break
         except Exception as e:
             logger.error(f"Error querying followers: {e}")
@@ -704,7 +685,6 @@ class fol(BaseBot):
                 self.limit[user_id] = lim.get(peer_id, 5)
                 self.update_limits()
                 
-                # Добавляем ссылку в свою БД
                 if self.db.add_link(message):
                     logger.info(f"Group added to followers by {namesurname}: {message}")
                 else:
@@ -715,7 +695,6 @@ class fol(BaseBot):
         return None
 
     def cond(self, x: str, y: int, q: int, namesurname: str):
-        """Обработка сообщений для подписок"""
         if 'УСЛУГА VIP' in x:
             self.delete_message(n2, y)
             self.send_message(n2,
@@ -738,7 +717,6 @@ class fol(BaseBot):
                 self.send_message(n2, response)
             return
 
-        # Обработка других команд
         if x == '':
             self.delete_message(n2, y)
             self.send_message(n2, '⚠ ' + namesurname + ', запрещено публиковать ссылки со вложениями.')
@@ -771,7 +749,6 @@ class fol(BaseBot):
                 self.send_message(n2, f'⚠ {namesurname}, разрешается размещать только ссылку на ГРУППУ! Исправьтесь!')
 
     def sorting(self, items: List[str], mes: str, y: int, namesurname: str):
-        """Отправка списка групп для подписки"""
         if items:
             self.delete_message(n2, y)
             items_text = ''.join(f'{i}. {link}\n' for i, link in enumerate(items, 1))
@@ -786,7 +763,6 @@ class fol(BaseBot):
             self.send_message(n2, f'{namesurname}, вы прошли все ссылки. Размещайте свою ссылку повторно.')
 
     def sort1(self, string: List[str], y: int, q: int, namesurname: str) -> List[str]:
-        """Обработка VIP групп"""
         self.vipslovar[q] = [
             i for i in string 
             if not self.is_followed(i, q)
@@ -795,7 +771,6 @@ class fol(BaseBot):
         return self.vipslovar[q]
     
     def sort2(self, string: List[str], y: int, q: int, namesurname: str) -> List[str]:
-        """Обработка обычных групп"""
         self.Ax[q] = list(islice(
             ('@club' + str(session.groups.getById(group_id=i[i.find('vk.com/')+7:])[0]['id']) 
              for i in string if self.check(i) and not self.is_followed(i, q)),
@@ -806,7 +781,6 @@ class fol(BaseBot):
         return self.Ax[q]
 
     def sort3(self, string: List[str], y: int, q: int, namesurname: str) -> List[str]:
-        """Проверка оставшихся групп"""
         self.posts[q] = [
             i for i in string 
             if not self.is_followed(i, q)
@@ -815,7 +789,6 @@ class fol(BaseBot):
         return self.posts[q]
 
     def cond2(self, x: str) -> bool:
-        """Проверка валидности URL для групп"""
         return validators.url(x) and 'vk.com' in x and 'wall' not in x and self.check(x)
 
 # ==================== КЛАСС COM (КОММЕНТАРИИ) ====================
@@ -823,7 +796,6 @@ class fol(BaseBot):
 class com(BaseBot):
     def __init__(self):
         super().__init__()
-        # Своя БД для комментариев
         self.db = BotDatabase('comments.db', 'posts')
         self.path = 'vipsforcomments.txt'
         self.path3 = 'Ludic.txt'
@@ -842,7 +814,6 @@ class com(BaseBot):
         self.keyboard.add_button("✨УСЛУГА VIP✨", VkKeyboardColor.NEGATIVE)
     
     def has_valid_comment(self, link: str, user_id: int) -> bool:
-        """Проверка наличия валидного комментария"""
         try:
             owner_id = int(link[link.index('wall')+4:link.find('_', link.index('wall')+4)])
             post_id = int(re.findall(r'\d+', link[link.find('wall'):])[1])
@@ -865,7 +836,6 @@ class com(BaseBot):
             return True
 
     def check(self, link: str) -> bool:
-        """Проверка доступности комментариев"""
         try:
             owner_id = int(link[link.index('wall')+4:link.find('_', link.index('wall')+4)])
             post_id = int(re.findall(r'\d+', link[link.find('wall'):])[1])
@@ -880,7 +850,6 @@ class com(BaseBot):
             return False
 
     def handle_link_automata(self, user: User, message: str, y: int, namesurname: str, peer_id: int) -> Optional[str]:
-        """Обработка ссылки для комментариев"""
         user_id = user.user_id
         
         if user_id in self.limit:
@@ -891,7 +860,6 @@ class com(BaseBot):
             self.delete_message(n3, y)
             return f'⚠ {namesurname}, запрещено публиковать ссылки закрытые для комментариев!'
 
-        # Чтение VIP ссылок
         vip_data = {}
         try:
             if os.path.exists(self.path):
@@ -901,20 +869,18 @@ class com(BaseBot):
         except Exception as e:
             logger.error(f"Error reading VIP comments: {e}")
 
-        # Обработка VIP ссылок
         vip_links = self.sort1(vip_data, y, user_id, namesurname)
         if vip_links:
             return None
 
-        # Обработка обычных ссылок через БД
         try:
-            results = self.db.get_recent_links(10)  # Берем больше для фильтрации
+            results = self.db.get_recent_links(10)
             A = []
             for row in results:
                 link = row[0]
                 if not self.has_valid_comment(link, user_id) and self.check(link):
                     A.append(link)
-                    if len(A) >= 3:  # Ограничиваем 3 постами
+                    if len(A) >= 3:
                         break
         except Exception as e:
             logger.error(f"Error querying comments: {e}")
@@ -932,7 +898,6 @@ class com(BaseBot):
                 self.limit[user_id] = lim.get(peer_id, 3)
                 self.update_limits()
                 
-                # Добавляем ссылку в свою БД
                 if self.db.add_link(message):
                     logger.info(f"Post added to comments by {namesurname}: {message}")
                 else:
@@ -943,7 +908,6 @@ class com(BaseBot):
         return None
 
     def cond(self, x: str, y: int, q: int, namesurname: str):
-        """Обработка сообщений для комментариев"""
         if 'УСЛУГА VIP' in x:
             self.delete_message(n3, y)
             self.send_message(n3,
@@ -968,7 +932,6 @@ class com(BaseBot):
                 self.send_message(n3, response)
             return
 
-        # Обработка VIP команд для комментариев
         if len(x.split()) == 2 and x.split()[0].lower() == 'з' and self.cond2(x.split()[1]) and filer(str(q), self.path3):
             self.delete_message(n3, y)
             if q in admins or q not in self.viptime or time.time() - self.viptime.get(q, 0) > 7200:
@@ -1045,7 +1008,6 @@ class com(BaseBot):
                 self.send_message(n3, '⚠ ' + namesurname + ', разрешается публиковать только ссылку на пост.')
 
     def sorting(self, items: List[str], mes: str, y: int, namesurname: str):
-        """Отправка списка постов для комментариев"""
         if items:
             self.delete_message(n3, y)
             items_text = ''.join(f'{i}. {post}\n' for i, post in enumerate(items, 1))
@@ -1060,13 +1022,12 @@ class com(BaseBot):
             self.send_message(n3, f'{namesurname}, вы прошли все ссылки. Размещайте свою ссылку повторно.')
 
     def sort1(self, vip_data: Dict[str, Any], y: int, q: int, namesurname: str) -> List[str]:
-        """Обработка VIP ссылок для комментариев"""
         string = list(vip_data.values())
         self.vipslovar[q] = []
         
         for i in string:
             try:
-                if len(self.vipslovar[q]) >= 3:  # Ограничение на количество постов
+                if len(self.vipslovar[q]) >= 3:
                     break
                     
                 if not self.has_valid_comment(i, q):
@@ -1080,12 +1041,11 @@ class com(BaseBot):
         return self.vipslovar[q]
 
     def sort2(self, string: List[str], y: int, q: int, namesurname: str) -> List[str]:
-        """Обработка обычных ссылок для комментариев"""
         self.Ax[q] = []
         
         for i in string:
             try:
-                if len(self.Ax[q]) >= 3:  # Ограничение на количество постов
+                if len(self.Ax[q]) >= 3:
                     break
                     
                 if not self.has_valid_comment(i, q):
@@ -1109,7 +1069,6 @@ class com(BaseBot):
         return self.Ax[q]
 
     def sort3(self, string: List[str], y: int, q: int, namesurname: str) -> List[str]:
-        """Проверка оставшихся постов для комментариев"""
         self.posts[q] = [
             i for i in string 
             if not self.has_valid_comment(i, q)
@@ -1118,7 +1077,6 @@ class com(BaseBot):
         return self.posts[q]
 
     def cond2(self, x: str) -> bool:
-        """Проверка валидности URL для комментариев"""
         return validators.url(x) and ('vk.com' in x or 'vk.ru' in x) and 'wall' in x and self.check(x)
 
 # ==================== КЛАСС LIKE15 (ЛАЙКИ 20|20) ====================
@@ -1126,7 +1084,6 @@ class com(BaseBot):
 class like15(BaseBot):
     def __init__(self):
         super().__init__()
-        # Своя БД для лайков 20|20
         self.db = BotDatabase('likes20.db', 'links')
         self.mess1 = 'пожалуйста, ЛАЙК на обязательные ссылки 𝓑𝓤𝞟:'
         self.mess2 = 'мы проставляем лайки по 20 последним ссылкам чата'
@@ -1147,7 +1104,6 @@ class like15(BaseBot):
         self.keyboard.add_button("🚀ТУРБО-VIP🚀", VkKeyboardColor.POSITIVE)
     
     def is_liked(self, link: str, user_id: int) -> bool:
-        """Проверка лайка на пост"""
         try:
             post_id = int(re.findall(r'\d+', link[link.find('wall'):])[1])
             owner_id = int(link[link.index('wall')+4:].split('_')[0])
@@ -1163,7 +1119,6 @@ class like15(BaseBot):
             return True
     
     def check(self, link: str) -> bool:
-        """Проверка существования поста"""
         try:
             owner_id = int(link[link.index('wall')+4:link.find('_', link.index('wall')+4)])
             post_id = int(re.findall(r'\d+', link[link.find('wall'):])[1])
@@ -1178,7 +1133,6 @@ class like15(BaseBot):
             return False
     
     def handle_link_automata(self, user: User, message: str, y: int, namesurname: str, peer_id: int) -> Optional[str]:
-        """Обработка ссылки через конечный автомат для 20|20"""
         user_id = user.user_id
         
         if not self.is_user_allowed(user_id, peer_id):
@@ -1191,7 +1145,6 @@ class like15(BaseBot):
             self.delete_message(n4, y)
             return f'⚠ {namesurname}{message_text} Дождитесь.'
 
-        # Чтение VIP ссылок
         vip_data = {}
         try:
             if os.path.exists(self.path):
@@ -1201,7 +1154,6 @@ class like15(BaseBot):
         except Exception as e:
             logger.error(f"Error reading VIP data in like15: {e}")
 
-        # Обработка VIP ссылок
         vip_links = self.sort1(vip_data, y, user_id, namesurname)
         if vip_links:
             return None
@@ -1218,7 +1170,6 @@ class like15(BaseBot):
                 self.limit[user_id] = lim.get(peer_id, 20)
                 self.update_limits()
                 
-                # Добавляем ссылку в свою БД
                 if self.db.add_link(message):
                     logger.info(f"Link added to likes20 by {namesurname}: {message}")
                 else:
@@ -1228,8 +1179,6 @@ class like15(BaseBot):
         return None
 
     def cond(self, x: str, y: int, q: int, namesurname: str):
-        """Основной метод обработки сообщений для 20|20"""
-        # Обработка команд
         if 'УСЛУГА VIP' in x:
             self.delete_message(n4, y)
             self.send_message(n4,
@@ -1259,7 +1208,6 @@ class like15(BaseBot):
 
         self.cleanup_expired_states()
 
-        # Обработка ссылок через автомат
         if self.cond2(x):
             user = self.user_states.get(q, User(q))
             response = self.handle_link_automata(user, x, y, namesurname, n4)
@@ -1267,7 +1215,6 @@ class like15(BaseBot):
                 self.send_message(n4, response)
             return
 
-        # Обработка VIP команд
         if len(x.split()) == 2 and x.split()[0].lower() == 'з' and self.cond2(x.split()[1]) and filer(str(q), self.path3):
             self.delete_message(n4, y)
             if q in admins or q not in self.viptime or time.time() - self.viptime.get(q, 0) > 7200:
@@ -1341,7 +1288,6 @@ class like15(BaseBot):
                 self.send_message(n4, '⚠ ' + namesurname + ', разрешается публиковать только ссылку на пост.')
 
     def sorting(self, items: List[str], mes: str, y: int, namesurname: str):
-        """Отправка списка постов для обработки"""
         if items:
             self.delete_message(n4, y)
             items_text = ''.join(f'{i}. {post}\n' for i, post in enumerate(items, 1))
@@ -1356,7 +1302,6 @@ class like15(BaseBot):
             self.send_message(n4, f'{namesurname}, вы прошли все ссылки. Размещайте свою ссылку повторно.')
 
     def sort1(self, vip_data: Dict[str, Any], y: int, q: int, namesurname: str) -> List[str]:
-        """Обработка VIP ссылок"""
         string = list(vip_data.values())
         self.vipslovar[q] = [
             i for i in string 
@@ -1366,16 +1311,14 @@ class like15(BaseBot):
         return self.vipslovar[q]
 
     def sort2(self, y: int, q: int, namesurname: str) -> List[str]:
-        """Получение обычных ссылок из БД"""
         try:
-            results = self.db.get_recent_links(30)  # Берем больше, чтобы отфильтровать
-            # Фильтруем в коде Python
+            results = self.db.get_recent_links(30)
             self.Ax[q] = []
             for row in results:
                 link = row[0]
                 if not self.is_liked(link, q) and self.check(link):
                     self.Ax[q].append(link)
-                    if len(self.Ax[q]) >= 20:  # Ограничиваем 20 ссылками
+                    if len(self.Ax[q]) >= 20:
                         break
         except Exception as e:
             logger.error(f"Error in sort2 in like15: {e}")
@@ -1386,7 +1329,6 @@ class like15(BaseBot):
         return self.Ax[q]
 
     def sort3(self, string: List[str], y: int, q: int, namesurname: str) -> List[str]:
-        """Проверка оставшихся постов"""
         self.posts[q] = [
             i for i in string 
             if not self.is_liked(i, q)
@@ -1395,7 +1337,6 @@ class like15(BaseBot):
         return self.posts[q]
 
     def cond2(self, x: str) -> bool:
-        """Проверка валидности URL для лайков"""
         return validators.url(x) and ('vk.com' in x or 'vk.ru' in x) and 'wall' in x
 
 # ==================== ИНИЦИАЛИЗАЦИЯ И ЗАПУСК ====================
@@ -1423,19 +1364,25 @@ if __name__ == '__main__':
     try:
         logger.info("Starting VK Bot...")
         
+        # Чтение токена из переменной окружения (настраивается на Bothost)
+        TOKEN = os.environ.get('VK_TOKEN')
+        if not TOKEN:
+            logger.error("VK_TOKEN не найден в переменных окружения!")
+            raise ValueError("VK_TOKEN не задан")
+        
+        # ID вашей группы (из ссылки https://vk.com/club237271112)
+        GROUP_ID = 237271112
+        
         # Инициализация VK API
-        nomer = ''
-        vk_session = vk_api.VkApi(token=nomer)
+        vk_session = vk_api.VkApi(token=TOKEN)
         vk = vk_session.get_api()
         
-        session2 = vk_api.VkApi(
-            token=''
-        )
+        session2 = vk_api.VkApi(token=TOKEN)
         session = session2.get_api()
         
-        longpoll = VkBotLongPoll(vk_session, '212869892')
+        longpoll = VkBotLongPoll(vk_session, GROUP_ID)
         
-        logger.info("VK Bot initialized successfully")
+        logger.info(f"✅ VK Bot initialized successfully. Group ID: {GROUP_ID}")
         logger.info(f"Monitoring peer_ids: {list(ql.keys())}")
         
         # Запуск главного цикла
