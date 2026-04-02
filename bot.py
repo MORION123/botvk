@@ -71,31 +71,34 @@ class MutualPRBot:
         
         # ШАГ 1: Выбор типа задания
         if step == 'waiting_type':
-            task_type_map = {
-                '🔄 репост': 'repost',
-                '❤️ лайк': 'like',
-                '📢 подписка': 'subscribe',
-                '💬 комментарий': 'comment'
-            }
-            
-            if message in task_type_map:
-                self.temp_tasks[user_id]['type'] = task_type_map[message]
-                self.temp_tasks[user_id]['step'] = 'waiting_link'
-                self.send_message(
-                    user_id,
-                    "📎 **Отправьте ссылку на пост или сообщество**\n\n"
-                    "На что нужно поставить лайк/репост/подписку?\n\n"
-                    "📌 Примеры:\n"
-                    "• https://vk.com/wall-237194046_90 (пост)\n"
-                    "• https://vk.com/club237194046 (сообщество)\n\n"
-                    "❌ Или напишите 'отмена' для выхода"
-                )
+            # Сравниваем с учётом эмодзи (message уже в нижнем регистре)
+            if message == '🔄 репост':
+                task_type = 'repost'
+            elif message == '❤️ лайк':
+                task_type = 'like'
+            elif message == '📢 подписка':
+                task_type = 'subscribe'
+            elif message == '💬 комментарий':
+                task_type = 'comment'
             else:
                 self.send_message(
                     user_id,
                     "❌ Пожалуйста, выберите тип задания из кнопок ниже:",
                     get_task_type_keyboard()
                 )
+                return True
+            
+            self.temp_tasks[user_id]['type'] = task_type
+            self.temp_tasks[user_id]['step'] = 'waiting_link'
+            self.send_message(
+                user_id,
+                "📎 **Отправьте ссылку на пост или сообщество**\n\n"
+                "На что нужно поставить лайк/репост/подписку?\n\n"
+                "📌 Примеры:\n"
+                "• https://vk.com/wall-237194046_90 (пост)\n"
+                "• https://vk.com/club237194046 (сообщество)\n\n"
+                "❌ Или напишите 'отмена' для выхода"
+            )
             return True
         
         # ШАГ 2: Ожидание ссылки
