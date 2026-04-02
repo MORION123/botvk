@@ -39,27 +39,45 @@ class BotDatabase:
             CREATE TABLE IF NOT EXISTS groups (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 link TEXT NOT NULL,
+                user_id INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         self.conn.commit()
         logger.info(f"Database {self.db_name} initialized")
     
-    def add_link(self, link: str) -> bool:
+    def add_link(self, link: str, user_id: int) -> bool:
         try:
-            self.conn.execute("INSERT INTO groups (link) VALUES (?)", (link,))
+            self.conn.execute("INSERT INTO groups (link, user_id) VALUES (?, ?)", (link, user_id))
             self.conn.commit()
+            logger.info(f"Link added: {link} by user {user_id}")
             return True
         except Exception as e:
             logger.error(f"Error adding link: {e}")
             return False
     
-    def get_recent_links(self, limit: int = 5):
+    def get_all_links(self, limit: int = 20):
+        """Получить последние ссылки (без ограничения по user_id)"""
         try:
-            cursor = self.conn.execute("SELECT DISTINCT link FROM groups ORDER BY id DESC LIMIT ?", (limit,))
-            return [row['link'] for row in cursor.fetchall()]
+            cursor = self.conn.execute(
+                "SELECT DISTINCT link, user_id FROM groups ORDER BY id DESC LIMIT ?", 
+                (limit,)
+            )
+            return [{'link': row['link'], 'user_id': row['user_id']} for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"Error getting links: {e}")
+            return []
+    
+    def get_links_by_user(self, user_id: int, limit: int = 10):
+        """Получить ссылки конкретного пользователя"""
+        try:
+            cursor = self.conn.execute(
+                "SELECT link FROM groups WHERE user_id = ? ORDER BY id DESC LIMIT ?", 
+                (user_id, limit)
+            )
+            return [row['link'] for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting user links: {e}")
             return []
     
     def close(self):
@@ -82,31 +100,43 @@ def create_keyboard():
 class SubscribeBot:
     def __init__(self):
         self.db = BotDatabase('subscriptions.db')
-        self.user_limits: Dict[int, int] = {}
-        self.user_links: Dict[int, List[str]] = {}
+        self.user_states: Dict[int, str] = {}  # 'waiting' или None
+        self.pending_links: Dict[int, List[str]] = {}  # какие ссылки нужно проверить
         self.keyboard = create_keyboard()
     
     def is_subscribed(self, link: str, user_id: int) -> bool:
+        """Проверка подписки на группу"""
         try:
             if 'club' in link:
                 group_id = link.split('club')[1].split('?')[0]
             else:
-                group_id = link.split('vk.com/')[1].split('?')[0]
+                # Извлекаем ID группы из ссылки
+                parts = link.split('vk.com/')[1].split('/')[0].split('?')[0]
+                if parts.isdigit():
+                    group_id = parts
+                else:
+                    group_id = parts
             result = vk.groups.isMember(group_id=group_id, user_id=user_id)
             return result
         except Exception as e:
             logger.error(f"Error checking subscription: {e}")
-            return True
+            return True  # При ошибке считаем подписанным
     
-    def check_group(self, link: str) -> bool:
+    def check_group_exists(self, link: str) -> bool:
+        """Проверка существования группы"""
         try:
-            group_id = link.split('vk.com/')[1].split('?')[0]
+            if 'club' in link:
+                group_id = link.split('club')[1].split('?')[0]
+            else:
+                group_id = link.split('vk.com/')[1].split('/')[0].split('?')[0]
             vk.groups.getById(group_id=group_id)
             return True
-        except:
+        except Exception as e:
+            logger.error(f"Group check error: {e}")
             return False
     
     def send_message(self, peer_id: int, text: str):
+        """Отправка сообщения с клавиатурой"""
         try:
             vk.messages.send(
                 peer_id=peer_id,
@@ -119,90 +149,108 @@ class SubscribeBot:
             logger.error(f"Error sending: {e}")
     
     def delete_message(self, peer_id: int, msg_id: int):
+        """Удаление сообщения"""
         try:
             vk.messages.delete(
                 conversation_message_ids=msg_id,
                 peer_id=peer_id,
                 delete_for_all=1
             )
-            logger.info(f"Message {msg_id} deleted")
+            logger.info(f"Message {msg_id} deleted from {peer_id}")
         except Exception as e:
             logger.error(f"Error deleting: {e}")
     
+    def get_all_pending_links(self, user_id: int, limit: int = 10) -> List[str]:
+        """Получить все ссылки, на которые пользователь ещё не подписался"""
+        all_links = self.db.get_all_links(limit)
+        pending = []
+        for item in all_links:
+            # Не показываем пользователю его собственные ссылки
+            if item['user_id'] == user_id:
+                continue
+            if not self.is_subscribed(item['link'], user_id):
+                pending.append(item['link'])
+        return pending
+    
     def handle_message(self, peer_id: int, user_id: int, text: str, msg_id: int, user_name: str):
-        logger.info(f"Handling message from {user_name}: {text[:50]}")
+        """Главный обработчик сообщений"""
+        logger.info(f"Handling from {user_name}: {text[:50]}")
         
-        # Команда "ПРАВИЛА ЧАТА"
+        # ========== КОМАНДЫ ==========
         if 'ПРАВИЛА ЧАТА' in text:
             self.delete_message(peer_id, msg_id)
             self.send_message(peer_id,
                 "🚀 ВЗАИМНЫЕ ПОДПИСКИ 5|5 🚀\n\n"
                 "✅ Разрешается публиковать только ссылку на ГРУППУ\n"
-                "✅ Подписывайтесь на 5 групп выше вашей ссылки\n"
+                "✅ Подписывайтесь на ВСЕ группы из списка\n"
                 "✅ После подписки отправьте ссылку ПОВТОРНО\n"
-                "❗ Запрещается отписываться от групп")
+                "✅ Можно публиковать ссылку в любое время\n"
+                "❗ Запрещается отписываться от групп\n"
+                "❗ Запрещены приватные группы")
             return
         
-        # VIP команды
         if 'УСЛУГА VIP' in text:
             self.delete_message(peer_id, msg_id)
-            self.send_message(peer_id, "✨ VIP УСЛУГА ✨\n\nПо всем вопросам: https://vk.com/dianamaysky")
+            self.send_message(peer_id, 
+                "✨ УСЛУГА VIP ✨\n\n"
+                "🎯 Ссылка закрепляется в чате\n"
+                "🎯 Взамен никого проходить не надо\n"
+                "🎯 Ссылку можно менять\n\n"
+                "По всем вопросам: https://vk.com/dianamaysky")
             return
         
         if 'ТУРБО-VIP' in text:
             self.delete_message(peer_id, msg_id)
-            self.send_message(peer_id, "🚀 ТУРБО-VIP 🚀\n\nПо всем вопросам: https://vk.com/dianamaysky")
+            self.send_message(peer_id,
+                "🚀 ТУРБО-VIP 🚀\n\n"
+                "🎯 200+ лайков в день\n"
+                "🎯 Ссылка закрепляется в чате\n"
+                "🎯 Взамен никого проходить не надо\n\n"
+                "По всем вопросам: https://vk.com/dianamaysky")
             return
         
-        # Проверка на ссылку группы
-        is_link = ('vk.com' in text and 'wall' not in text and self.check_group(text))
+        # ========== ПРОВЕРКА ССЫЛКИ ==========
+        is_group_link = ('vk.com' in text and 'wall' not in text and self.check_group_exists(text))
         
-        if not is_link:
+        if not is_group_link:
             self.delete_message(peer_id, msg_id)
             self.send_message(peer_id, f"⚠ {user_name}, разрешается публиковать только ссылку на ГРУППУ!")
             return
         
-        # Проверка лимита (5 через 5)
-        if user_id in self.user_limits and self.user_limits[user_id] > 0:
-            self.delete_message(peer_id, msg_id)
-            self.send_message(peer_id, f"⚠ {user_name}, ещё НЕ прошло 5 чужих ссылок. Дождитесь.")
-            return
-        
-        # Получаем последние 5 ссылок
-        last_links = self.db.get_recent_links(5)
-        
-        # Фильтруем те, на которые пользователь ещё не подписался
-        pending = []
-        for link in last_links:
-            if not self.is_subscribed(link, user_id):
-                pending.append(link)
+        # Проверяем, есть ли у пользователя неподписанные ссылки
+        pending = self.get_all_pending_links(user_id, limit=15)
         
         if pending:
-            self.user_links[user_id] = pending
+            # Пользователь ещё не подписался на какие-то ссылки
+            self.user_states[user_id] = 'waiting'
+            self.pending_links[user_id] = pending
+            
             self.delete_message(peer_id, msg_id)
             links_text = '\n'.join([f"{i+1}. {l}" for i, l in enumerate(pending)])
             self.send_message(peer_id,
                 f"{user_name},\nпожалуйста, подпишитесь на эти группы:\n\n{links_text}\n\n"
-                f"⌛ На выполнение: 6 минут\nПосле подписки отправьте ссылку ПОВТОРНО")
+                f"⌛ На выполнение: 6 минут\n"
+                f"✅ После подписки отправьте ссылку ПОВТОРНО\n\n"
+                f"🎯 Ваша ссылка будет добавлена после выполнения всех подписок")
         else:
-            # Все подписки выполнены — добавляем новую ссылку
-            self.db.add_link(text)
-            self.user_limits[user_id] = 5
+            # Все подписки выполнены — добавляем ссылку пользователя
+            if self.db.add_link(text, user_id):
+                self.delete_message(peer_id, msg_id)
+                self.send_message(peer_id,
+                    f"{user_name}, ✅ ваша ссылка успешно добавлена!\n\n"
+                    f"📢 Теперь другие участники увидят её в списке для подписки\n\n"
+                    f"🚀 По вопросам VIP: https://vk.com/dianamaysky")
+            else:
+                self.send_message(peer_id, "❌ Ошибка при добавлении ссылки")
             
-            # Уменьшаем лимиты у других
-            for uid in list(self.user_limits.keys()):
-                if self.user_limits[uid] > 1:
-                    self.user_limits[uid] -= 1
-            
-            self.delete_message(peer_id, msg_id)
-            self.send_message(peer_id,
-                f"{user_name}, ваша ссылка успешно добавлена\n"
-                f"🚀 По вопросам VIP: https://vk.com/dianamaysky")
+            # Очищаем состояние пользователя
+            self.user_states.pop(user_id, None)
+            self.pending_links.pop(user_id, None)
 
 # ==================== ЗАПУСК ====================
 if __name__ == '__main__':
     try:
-        logger.info("🚀 Запуск бота подписок...")
+        logger.info("🚀 Запуск бота подписок (без очереди)...")
         
         vk_session = vk_api.VkApi(token=TOKEN)
         vk = vk_session.get_api()
