@@ -3,11 +3,13 @@ import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 import time
+import re
 import threading
 import sqlite3
+import random
 import logging
 import os
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 # ==================== НАСТРОЙКА ЛОГИРОВАНИЯ ====================
 logging.basicConfig(
@@ -55,6 +57,7 @@ class BotDatabase:
             return False
     
     def get_all_links(self, limit: int = 20):
+        """Получить последние ссылки (без ограничения по user_id)"""
         try:
             cursor = self.conn.execute(
                 "SELECT DISTINCT link, user_id FROM groups ORDER BY id DESC LIMIT ?", 
@@ -63,6 +66,18 @@ class BotDatabase:
             return [{'link': row['link'], 'user_id': row['user_id']} for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"Error getting links: {e}")
+            return []
+    
+    def get_links_by_user(self, user_id: int, limit: int = 10):
+        """Получить ссылки конкретного пользователя"""
+        try:
+            cursor = self.conn.execute(
+                "SELECT link FROM groups WHERE user_id = ? ORDER BY id DESC LIMIT ?", 
+                (user_id, limit)
+            )
+            return [row['link'] for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting user links: {e}")
             return []
     
     def close(self):
@@ -85,24 +100,30 @@ def create_keyboard():
 class SubscribeBot:
     def __init__(self):
         self.db = BotDatabase('subscriptions.db')
-        self.user_states: Dict[int, str] = {}
-        self.pending_links: Dict[int, List[str]] = {}
+        self.user_states: Dict[int, str] = {}  # 'waiting' или None
+        self.pending_links: Dict[int, List[str]] = {}  # какие ссылки нужно проверить
         self.keyboard = create_keyboard()
     
     def is_subscribed(self, link: str, user_id: int) -> bool:
+        """Проверка подписки на группу"""
         try:
             if 'club' in link:
                 group_id = link.split('club')[1].split('?')[0]
             else:
+                # Извлекаем ID группы из ссылки
                 parts = link.split('vk.com/')[1].split('/')[0].split('?')[0]
-                group_id = parts
+                if parts.isdigit():
+                    group_id = parts
+                else:
+                    group_id = parts
             result = vk.groups.isMember(group_id=group_id, user_id=user_id)
             return result
         except Exception as e:
             logger.error(f"Error checking subscription: {e}")
-            return True
+            return True  # При ошибке считаем подписанным
     
     def check_group_exists(self, link: str) -> bool:
+        """Проверка существования группы"""
         try:
             if 'club' in link:
                 group_id = link.split('club')[1].split('?')[0]
@@ -110,59 +131,41 @@ class SubscribeBot:
                 group_id = link.split('vk.com/')[1].split('/')[0].split('?')[0]
             vk.groups.getById(group_id=group_id)
             return True
-        except:
+        except Exception as e:
+            logger.error(f"Group check error: {e}")
             return False
     
-    def send_message(self, peer_id: int, text: str, delete_after: int = 15):
-        """Отправка сообщения с автоматическим удалением через delete_after секунд"""
+    def send_message(self, peer_id: int, text: str):
+        """Отправка сообщения с клавиатурой"""
         try:
-            sent = vk.messages.send(
+            vk.messages.send(
                 peer_id=peer_id,
                 message=text,
                 random_id=0,
                 keyboard=self.keyboard.get_keyboard()
             )
             logger.info(f"Message sent to {peer_id}")
-            
-            # Запускаем таймер для удаления сообщения через delete_after секунд
-            if delete_after > 0:
-                def delete_later():
-                    time.sleep(delete_after)
-                    try:
-                        # Получаем conversation_message_id последнего сообщения
-                        history = vk.messages.getHistory(peer_id=peer_id, count=1)
-                        if history['items']:
-                            msg_id = history['items'][0]['conversation_message_id']
-                            vk.messages.delete(
-                                conversation_message_ids=msg_id,
-                                peer_id=peer_id,
-                                delete_for_all=1
-                            )
-                            logger.info(f"Auto-deleted message after {delete_after}s")
-                    except Exception as e:
-                        logger.error(f"Auto-delete error: {e}")
-                
-                threading.Thread(target=delete_later, daemon=True).start()
-                
         except Exception as e:
             logger.error(f"Error sending: {e}")
     
     def delete_message(self, peer_id: int, msg_id: int):
-        """Немедленное удаление сообщения"""
+        """Удаление сообщения"""
         try:
             vk.messages.delete(
                 conversation_message_ids=msg_id,
                 peer_id=peer_id,
                 delete_for_all=1
             )
-            logger.info(f"Message {msg_id} deleted")
+            logger.info(f"Message {msg_id} deleted from {peer_id}")
         except Exception as e:
             logger.error(f"Error deleting: {e}")
     
     def get_all_pending_links(self, user_id: int, limit: int = 10) -> List[str]:
+        """Получить все ссылки, на которые пользователь ещё не подписался"""
         all_links = self.db.get_all_links(limit)
         pending = []
         for item in all_links:
+            # Не показываем пользователю его собственные ссылки
             if item['user_id'] == user_id:
                 continue
             if not self.is_subscribed(item['link'], user_id):
@@ -170,9 +173,10 @@ class SubscribeBot:
         return pending
     
     def handle_message(self, peer_id: int, user_id: int, text: str, msg_id: int, user_name: str):
+        """Главный обработчик сообщений"""
         logger.info(f"Handling from {user_name}: {text[:50]}")
         
-        # ========== КОМАНДЫ (удаляются через 15 секунд) ==========
+        # ========== КОМАНДЫ ==========
         if 'ПРАВИЛА ЧАТА' in text:
             self.delete_message(peer_id, msg_id)
             self.send_message(peer_id,
@@ -182,8 +186,7 @@ class SubscribeBot:
                 "✅ После подписки отправьте ссылку ПОВТОРНО\n"
                 "✅ Можно публиковать ссылку в любое время\n"
                 "❗ Запрещается отписываться от групп\n"
-                "❗ Запрещены приватные группы",
-                delete_after=15)
+                "❗ Запрещены приватные группы")
             return
         
         if 'УСЛУГА VIP' in text:
@@ -193,8 +196,7 @@ class SubscribeBot:
                 "🎯 Ссылка закрепляется в чате\n"
                 "🎯 Взамен никого проходить не надо\n"
                 "🎯 Ссылку можно менять\n\n"
-                "По всем вопросам: https://vk.com/1morion11",
-                delete_after=15)
+                "По всем вопросам: https://vk.com/dianamaysky")
             return
         
         if 'ТУРБО-VIP' in text:
@@ -204,8 +206,7 @@ class SubscribeBot:
                 "🎯 200+ лайков в день\n"
                 "🎯 Ссылка закрепляется в чате\n"
                 "🎯 Взамен никого проходить не надо\n\n"
-                "По всем вопросам: https://vk.com/1morion11",
-                delete_after=15)
+                "По всем вопросам: https://vk.com/dianamaysky")
             return
         
         # ========== ПРОВЕРКА ССЫЛКИ ==========
@@ -213,47 +214,43 @@ class SubscribeBot:
         
         if not is_group_link:
             self.delete_message(peer_id, msg_id)
-            self.send_message(peer_id, f"⚠ {user_name}, разрешается публиковать только ссылку на ГРУППУ!", delete_after=15)
+            self.send_message(peer_id, f"⚠ {user_name}, разрешается публиковать только ссылку на ГРУППУ!")
             return
         
         # Проверяем, есть ли у пользователя неподписанные ссылки
         pending = self.get_all_pending_links(user_id, limit=15)
         
         if pending:
+            # Пользователь ещё не подписался на какие-то ссылки
             self.user_states[user_id] = 'waiting'
             self.pending_links[user_id] = pending
             
-            # Удаляем сообщение пользователя со ссылкой
             self.delete_message(peer_id, msg_id)
-            
             links_text = '\n'.join([f"{i+1}. {l}" for i, l in enumerate(pending)])
             self.send_message(peer_id,
                 f"{user_name},\nпожалуйста, подпишитесь на эти группы:\n\n{links_text}\n\n"
                 f"⌛ На выполнение: 6 минут\n"
                 f"✅ После подписки отправьте ссылку ПОВТОРНО\n\n"
-                f"🎯 Ваша ссылка будет добавлена после выполнения всех подписок",
-                delete_after=15)
+                f"🎯 Ваша ссылка будет добавлена после выполнения всех подписок")
         else:
-            # ✅ ВСЕ ПОДПИСКИ ВЫПОЛНЕНЫ — ссылка остаётся в чате навсегда!
+            # Все подписки выполнены — добавляем ссылку пользователя
             if self.db.add_link(text, user_id):
-                # НЕ удаляем сообщение пользователя со ссылкой — оно остаётся в чате
-                # Отправляем подтверждение, которое удалится через 15 секунд
+                self.delete_message(peer_id, msg_id)
                 self.send_message(peer_id,
                     f"{user_name}, ✅ ваша ссылка успешно добавлена!\n\n"
                     f"📢 Теперь другие участники увидят её в списке для подписки\n\n"
-                    f"🚀 По вопросам VIP: https://vk.com/1morion11",
-                    delete_after=15)
+                    f"🚀 По вопросам VIP: https://vk.com/dianamaysky")
             else:
-                self.delete_message(peer_id, msg_id)
-                self.send_message(peer_id, "❌ Ошибка при добавлении ссылки", delete_after=15)
+                self.send_message(peer_id, "❌ Ошибка при добавлении ссылки")
             
+            # Очищаем состояние пользователя
             self.user_states.pop(user_id, None)
             self.pending_links.pop(user_id, None)
 
 # ==================== ЗАПУСК ====================
 if __name__ == '__main__':
     try:
-        logger.info("🚀 Запуск бота подписок...")
+        logger.info("🚀 Запуск бота подписок (без очереди)...")
         
         vk_session = vk_api.VkApi(token=TOKEN)
         vk = vk_session.get_api()
@@ -267,6 +264,7 @@ if __name__ == '__main__':
                 msg = event.obj.message
                 peer_id = msg['peer_id']
                 
+                # Обрабатываем только нужные беседы
                 if peer_id not in [2000000003, 2000000206]:
                     continue
                 
@@ -274,6 +272,7 @@ if __name__ == '__main__':
                 text = msg.get('text', '')
                 msg_id = msg['conversation_message_id']
                 
+                # Получаем имя пользователя
                 try:
                     user = vk.users.get(user_ids=user_id)[0]
                     user_name = f"{user['first_name']} {user['last_name']}"
@@ -282,6 +281,7 @@ if __name__ == '__main__':
                 
                 logger.info(f"📩 {peer_id} | {user_name}: {text[:50]}")
                 
+                # Обработка в отдельном потоке
                 threading.Thread(
                     target=bot.handle_message,
                     args=(peer_id, user_id, text, msg_id, user_name),
