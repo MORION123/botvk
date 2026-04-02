@@ -4,33 +4,38 @@ from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 import logging
 import time
 
-# Настройка логов
+# ==================== НАСТРОЙКА ЛОГИРОВАНИЯ ====================
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
+# ==================== ЧТЕНИЕ ПЕРЕМЕННЫХ ОКРУЖЕНИЯ ====================
+TOKEN = os.environ.get('VK_TOKEN')
+PEER_ID = int(os.environ.get('PEER_ID', 2000000204))  # ваша беседа
+GROUP_ID = int(os.environ.get('GROUP_ID', 237271112))  # ваше сообщество
+
 if __name__ == '__main__':
-    # Читаем токен из переменной окружения
-    TOKEN = os.environ.get('VK_TOKEN')
+    # Проверка наличия токена
     if not TOKEN:
-        logger.error("VK_TOKEN не найден!")
+        logger.error("❌ VK_TOKEN не найден в переменных окружения!")
         exit(1)
     
-    GROUP_ID = 237271112  # ID вашего сообщества
-    
-    logger.info(f"Запуск тестового бота. GROUP_ID: {GROUP_ID}")
+    logger.info(f"🚀 Запуск тестового бота")
+    logger.info(f"   GROUP_ID: {GROUP_ID}")
+    logger.info(f"   PEER_ID (целевая беседа): {PEER_ID}")
     
     try:
-        # Подключаемся
+        # Подключение к VK API
         vk_session = vk_api.VkApi(token=TOKEN)
         vk = vk_session.get_api()
         longpoll = VkBotLongPoll(vk_session, GROUP_ID)
         
-        logger.info("✅ Бот подключен. Ожидание сообщений...")
+        logger.info("✅ Бот успешно подключен к Long Poll API")
+        logger.info("📡 Ожидание сообщений...")
         
-        # Слушаем события
+        # Основной цикл обработки событий
         for event in longpoll.listen():
             if event.type == VkBotEventType.MESSAGE_NEW:
                 msg = event.obj.message
@@ -38,22 +43,28 @@ if __name__ == '__main__':
                 from_id = msg['from_id']
                 text = msg.get('text', '')
                 
-                logger.info(f"📩 Новое сообщение!")
+                logger.info(f"📩 Получено сообщение")
                 logger.info(f"   Peer ID: {peer_id}")
                 logger.info(f"   From ID: {from_id}")
-                logger.info(f"   Текст: {text}")
+                logger.info(f"   Текст: {text[:100]}")
                 
-                # Отвечаем только в беседу с peer_id = 2000000204
-                if peer_id == 2000000204:
+                # Отвечаем ТОЛЬКО в целевую беседу
+                if peer_id == PEER_ID:
                     try:
+                        # Отправляем ответ
+                        response_text = f"✅ Бот работает!\n\nПолучено сообщение:\n{text[:200]}"
                         vk.messages.send(
                             peer_id=peer_id,
-                            message=f"✅ Бот работает! Получено сообщение: {text[:50]}",
+                            message=response_text,
                             random_id=0
                         )
-                        logger.info("✅ Ответ отправлен в беседу")
+                        logger.info(f"✅ Ответ отправлен в беседу {PEER_ID}")
                     except Exception as e:
                         logger.error(f"❌ Ошибка при отправке ответа: {e}")
-                        
+                else:
+                    logger.info(f"⏩ Игнорируем сообщение из беседы {peer_id} (ожидаем {PEER_ID})")
+                    
     except Exception as e:
-        logger.error(f"❌ Ошибка: {e}")
+        logger.error(f"❌ Критическая ошибка: {e}")
+        logger.info("Перезапуск через 5 секунд...")
+        time.sleep(5)
