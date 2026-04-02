@@ -1,7 +1,32 @@
-*.db
-*.json
-__pycache__/
-*.pyc
-.DS_Store
-venv/
+# Файлы с секретами
+config.py
 .env
+*.key
+
+# Базы данных
+*.db
+*.sqlite
+*.sqlite3
+
+# JSON файлы с данными
+*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Логи
+*.log
