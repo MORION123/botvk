@@ -1371,7 +1371,7 @@ if __name__ == '__main__':
             raise ValueError("VK_TOKEN не задан")
         
         # ID вашей группы (из ссылки https://vk.com/club237271112)
-        GROUP_ID = 237271112
+        GROUP_ID = int(os.environ.get('GROUP_ID', 237271112))
         
         # Инициализация VK API
         vk_session = vk_api.VkApi(token=TOKEN)
