@@ -1,4 +1,3 @@
-import validators
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
@@ -93,9 +92,10 @@ class SubscribeBot:
         try:
             if 'club' in link:
                 group_id = link.split('club')[1].split('?')[0]
+            elif 'public' in link:
+                group_id = link.split('public')[1].split('?')[0]
             else:
-                parts = link.split('vk.com/')[1].split('/')[0].split('?')[0]
-                group_id = parts
+                group_id = link.split('vk.com/')[1].split('/')[0].split('?')[0]
             result = vk.groups.isMember(group_id=group_id, user_id=user_id)
             return result
         except Exception as e:
@@ -103,42 +103,50 @@ class SubscribeBot:
             return True
     
     def check_group_exists(self, link: str) -> bool:
+        """Проверяет только формат ссылки (не проверяет существование)"""
+        # Проверяем, что это ссылка на группу VK (не на пост, фото, видео)
+        if ('vk.com' not in link or 
+            'wall' in link or 
+            'photo' in link or 
+            'video' in link or 
+            'album' in link):
+            return False
+        
+        # Извлекаем идентификатор
         try:
             if 'club' in link:
                 group_id = link.split('club')[1].split('?')[0]
+            elif 'public' in link:
+                group_id = link.split('public')[1].split('?')[0]
             else:
-                group_id = link.split('vk.com/')[1].split('/')[0].split('?')[0]
-            vk.groups.getById(group_id=group_id)
-            return True
+                parts = link.split('vk.com/')[1].split('/')[0].split('?')[0]
+                group_id = parts
+            
+            # Если есть ID, считаем ссылку валидной
+            return group_id is not None and len(group_id) > 0
         except:
-            return False
+            return True  # Если не удалось разобрать, но похоже на ссылку VK — пропускаем
     
     def send_message(self, peer_id: int, text: str, delete_after: int = 15):
-        """Отправка сообщения с автоматическим удалением через delete_after секунд"""
         try:
-            sent = vk.messages.send(
+            response = vk.messages.send(
                 peer_id=peer_id,
                 message=text,
                 random_id=0,
                 keyboard=self.keyboard.get_keyboard()
             )
-            logger.info(f"Message sent to {peer_id}")
+            logger.info(f"Message sent to {peer_id}, msg_id: {response}")
             
-            # Запускаем таймер для удаления сообщения через delete_after секунд
             if delete_after > 0:
                 def delete_later():
                     time.sleep(delete_after)
                     try:
-                        # Получаем conversation_message_id последнего сообщения
-                        history = vk.messages.getHistory(peer_id=peer_id, count=1)
-                        if history['items']:
-                            msg_id = history['items'][0]['conversation_message_id']
-                            vk.messages.delete(
-                                conversation_message_ids=msg_id,
-                                peer_id=peer_id,
-                                delete_for_all=1
-                            )
-                            logger.info(f"Auto-deleted message after {delete_after}s")
+                        vk.messages.delete(
+                            conversation_message_ids=response,
+                            peer_id=peer_id,
+                            delete_for_all=1
+                        )
+                        logger.info(f"Auto-deleted message {response} after {delete_after}s")
                     except Exception as e:
                         logger.error(f"Auto-delete error: {e}")
                 
@@ -148,7 +156,6 @@ class SubscribeBot:
             logger.error(f"Error sending: {e}")
     
     def delete_message(self, peer_id: int, msg_id: int):
-        """Немедленное удаление сообщения"""
         try:
             vk.messages.delete(
                 conversation_message_ids=msg_id,
@@ -159,7 +166,7 @@ class SubscribeBot:
         except Exception as e:
             logger.error(f"Error deleting: {e}")
     
-    def get_all_pending_links(self, user_id: int, limit: int = 10) -> List[str]:
+    def get_all_pending_links(self, user_id: int, limit: int = 15) -> List[str]:
         all_links = self.db.get_all_links(limit)
         pending = []
         for item in all_links:
@@ -172,7 +179,7 @@ class SubscribeBot:
     def handle_message(self, peer_id: int, user_id: int, text: str, msg_id: int, user_name: str):
         logger.info(f"Handling from {user_name}: {text[:50]}")
         
-        # ========== КОМАНДЫ (удаляются через 15 секунд) ==========
+        # ========== КОМАНДЫ ==========
         if 'ПРАВИЛА ЧАТА' in text:
             self.delete_message(peer_id, msg_id)
             self.send_message(peer_id,
@@ -209,11 +216,12 @@ class SubscribeBot:
             return
         
         # ========== ПРОВЕРКА ССЫЛКИ ==========
-        is_group_link = ('vk.com' in text and 'wall' not in text and self.check_group_exists(text))
-        
-        if not is_group_link:
+        # Проверяем формат ссылки
+        if not self.check_group_exists(text):
             self.delete_message(peer_id, msg_id)
-            self.send_message(peer_id, f"⚠ {user_name}, разрешается публиковать только ссылку на ГРУППУ!", delete_after=15)
+            self.send_message(peer_id, f"⚠ {user_name}, разрешается публиковать только ссылку на ГРУППУ!\n\n"
+                               f"Пример: https://vk.com/club123456789", 
+                               delete_after=15)
             return
         
         # Проверяем, есть ли у пользователя неподписанные ссылки
@@ -223,7 +231,6 @@ class SubscribeBot:
             self.user_states[user_id] = 'waiting'
             self.pending_links[user_id] = pending
             
-            # Удаляем сообщение пользователя со ссылкой
             self.delete_message(peer_id, msg_id)
             
             links_text = '\n'.join([f"{i+1}. {l}" for i, l in enumerate(pending)])
@@ -234,10 +241,7 @@ class SubscribeBot:
                 f"🎯 Ваша ссылка будет добавлена после выполнения всех подписок",
                 delete_after=15)
         else:
-            # ✅ ВСЕ ПОДПИСКИ ВЫПОЛНЕНЫ — ссылка остаётся в чате навсегда!
             if self.db.add_link(text, user_id):
-                # НЕ удаляем сообщение пользователя со ссылкой — оно остаётся в чате
-                # Отправляем подтверждение, которое удалится через 15 секунд
                 self.send_message(peer_id,
                     f"{user_name}, ✅ ваша ссылка успешно добавлена!\n\n"
                     f"📢 Теперь другие участники увидят её в списке для подписки\n\n"
